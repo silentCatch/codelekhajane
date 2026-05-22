@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>CodeAgent Mobile — AI Code Editor</title>
+  <meta name="description" content="CodeAgent — AI-powered mobile code editor with real-time chat, live preview, and intelligent code generation." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/src/mobile.css" />
+</head>
+<body>
+  <!-- Animated Background Mesh -->
+  <div class="bg-mesh" aria-hidden="true">
+    <div class="mesh-orb mesh-orb-1"></div>
+    <div class="mesh-orb mesh-orb-2"></div>
+    <div class="mesh-orb mesh-orb-3"></div>
+  </div>
+
+  <!-- Glassmorphic Top Bar -->
+  <header id="topbar">
+    <div class="topbar-left">
+      <div class="logo">
+        <div class="logo-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" stroke="url(#bolt-grad)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs>
+              <linearGradient id="bolt-grad" x1="3" y1="2" x2="21" y2="22">
+                <stop stop-color="#00f0ff"/>
+                <stop offset="1" stop-color="#b400ff"/>
+              </linearGradient>
+            </defs>
+          </svg>
+        </div>
+        <span class="logo-text">Code<span class="accent">Agent</span></span>
+      </div>
+    </div>
+    
+    <!-- Pill-Style View Switcher Tabs -->
+    <div class="topbar-right">
+      <div class="mobile-tabs" id="mobileTabs">
+        <div class="tab-indicator" id="tabIndicator"></div>
+        <button class="mobile-tab-btn active" data-view="chat" title="Chat">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+          </svg>
+        </button>
+        <button class="mobile-tab-btn" data-view="code" title="Code">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>
+          </svg>
+        </button>
+        <button class="mobile-tab-btn" data-view="preview" title="Preview">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main id="mainLayout">
+    <!-- 1. Chat Panel -->
+    <section id="chatPanel" class="panel mobile-view-panel active">
+      <div class="chat-messages" id="chatMessages">
+        <div class="welcome-message">
+          <!-- Animated Glow Orb -->
+          <div class="welcome-orb">
+            <div class="orb-ring"></div>
+            <div class="orb-core">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none">
+                <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" fill="url(#orb-grad)" opacity="0.9"/>
+                <defs>
+                  <linearGradient id="orb-grad" x1="3" y1="2" x2="21" y2="22">
+                    <stop stop-color="#00f0ff"/>
+                    <stop offset="1" stop-color="#b400ff"/>
+                  </linearGradient>
+                </defs>
+              </svg>
+            </div>
+          </div>
+          <h3>Hey there! 👋</h3>
+          <p>I'm your AI coding assistant. Let's build something amazing together.</p>
+          
+          <div class="quick-actions">
+            <button class="quick-action-btn" data-prompt="Create a beautiful landing page with animated gradients and modern design">
+              <div class="qa-icon">✨</div>
+              <div class="qa-content">
+                <span class="qa-title">Landing Page</span>
+                <span class="qa-desc">Animated gradients & modern design</span>
+              </div>
+              <svg class="qa-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+            <button class="quick-action-btn" data-prompt="Build a todo app with local storage, animations, and a sleek dark theme">
+              <div class="qa-icon">📋</div>
+              <div class="qa-content">
+                <span class="qa-title">Todo App</span>
+                <span class="qa-desc">Storage, animations & dark theme</span>
+              </div>
+              <svg class="qa-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+            <button class="quick-action-btn" data-prompt="Create an interactive animated particle background using canvas">
+              <div class="qa-icon">🎨</div>
+              <div class="qa-content">
+                <span class="qa-title">Particle Animation</span>
+                <span class="qa-desc">Interactive canvas particles</span>
+              </div>
+              <svg class="qa-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Chat Input Area -->
+      <div class="chat-input-area">
+        <!-- Attachment Preview -->
+        <div class="attachment-preview-container" id="attachmentPreview" style="display: none;">
+          <div class="attachment-thumbnail">
+            <img src="" id="attachmentImg" alt="Attachment" />
+            <button class="remove-attachment-btn" id="removeAttachmentBtn" title="Remove">&times;</button>
+          </div>
+        </div>
+
+        <!-- Controls Row -->
+        <div class="input-controls-toolbar">
+          <div class="input-control-dropdowns">
+            <div class="model-selector-inline" id="modelSelectorInline">
+              <button class="control-chip" id="modelSelectBtnInline" title="Select Model">
+                <span class="chip-icon">⚡</span>
+                <span class="chip-label" id="currentModelNameInline">LLaMA 3.3 70B</span>
+                <svg class="chip-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+              </button>
+              <div class="control-dropdown-menu" id="modelDropdownInline">
+                <div id="modelListInline"></div>
+              </div>
+            </div>
+
+            <div class="mode-selector-inline" id="modeSelectorInline">
+              <button class="control-chip" id="modeSelectBtnInline" title="Select Mode">
+                <span class="chip-icon mode-icon">🤖</span>
+                <span class="chip-label mode-name">Agent</span>
+                <svg class="chip-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+              </button>
+              <div class="control-dropdown-menu" id="modeDropdownInline">
+                <div class="dropdown-header">Select Mode</div>
+                <div class="mode-option-item active" data-mode="agent">
+                  <div class="mode-option-title">🤖 Agent</div>
+                  <div class="mode-option-desc">AI writes and edits code</div>
+                </div>
+                <div class="mode-option-item" data-mode="chat">
+                  <div class="mode-option-title">💬 Chat</div>
+                  <div class="mode-option-desc">Ask coding questions</div>
+                </div>
+                <div class="mode-option-item" data-mode="auto">
+                  <div class="mode-option-title">⚡ Auto</div>
+                  <div class="mode-option-desc">AI auto-applies code changes</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Input Box -->
+        <div class="chat-input-row">
+          <button class="input-icon-btn" id="attachBtn" title="Attach Image">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <rect x="3" y="3" width="18" height="18" rx="2.5" ry="2.5"/>
+              <circle cx="8.5" cy="8.5" r="1.5"/>
+              <polyline points="21 15 16 10 5 21"/>
+            </svg>
+          </button>
+          <input type="file" id="imageAttachmentInput" accept="image/*" style="display: none;" />
+          <textarea id="chatInput" placeholder="Message CodeAgent..." rows="1"></textarea>
+          <button class="send-btn" id="sendBtn" title="Send">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 2L11 13M22 2L15 22 11 13 2 9 22 2z"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. Code Panel -->
+    <section id="codePanel" class="panel mobile-view-panel">
+      <div class="mobile-toolbar">
+        <div class="file-selector-wrapper">
+          <select id="mobileFileSelector" class="mobile-file-select">
+            <option value="index.html">index.html</option>
+            <option value="style.css">style.css</option>
+            <option value="script.js">script.js</option>
+          </select>
+        </div>
+        <span class="mobile-toolbar-filename" id="mobileActiveFileName">index.html</span>
+      </div>
+      <div class="mobile-editor-content">
+        <div id="mobileEditorContainer" class="mobile-cm-editor"></div>
+      </div>
+    </section>
+
+    <!-- 3. Preview Panel -->
+    <section id="previewPanel" class="panel mobile-view-panel">
+      <div class="mobile-toolbar">
+        <span class="mobile-toolbar-title">
+          <span class="live-dot"></span>
+          Live Preview
+        </span>
+        <button class="mobile-run-btn" id="mobileRunBtn">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Run
+        </button>
+      </div>
+      <div class="mobile-preview-content">
+        <iframe id="mobilePreviewFrame" sandbox="allow-scripts allow-modals allow-same-origin" title="Live Preview"></iframe>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="/src/mobile.js"></script>
+</body>
+</html>

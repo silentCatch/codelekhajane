@@ -1,3 +1,11 @@
+function checkViewport() {
+  if (window.innerWidth <= 768) {
+    window.location.href = '/mobile';
+  }
+}
+checkViewport();
+window.addEventListener('resize', checkViewport);
+
 import { EditorState } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers, highlightActiveLineGutter, highlightSpecialChars, drawSelection, highlightActiveLine, rectangularSelection, crosshairCursor } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
@@ -12,28 +20,36 @@ import { marked } from 'marked';
 
 // ===== State =====
 const state = {
-  currentFile: 'html',
+  currentFile: 'index.html',
   currentView: 'editor',
   currentMode: 'agent',
   currentModel: 'llama-3.3-70b-versatile',
   isGenerating: false,
   messages: [],
   files: {
-    html: `<!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="UTF-8">\n  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n  <title>My Project</title>\n  <link rel="stylesheet" href="style.css">\n</head>\n<body>\n  <h1>Hello World!</h1>\n  <p>Start coding or ask the AI agent to generate code for you.</p>\n  <script src="script.js"><\/script>\n</body>\n</html>`,
-    css: `* {\n  margin: 0;\n  padding: 0;\n  box-sizing: border-box;\n}\n\nbody {\n  font-family: system-ui, sans-serif;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  min-height: 100vh;\n  background: #0a0a0f;\n  color: #e8e8f0;\n}\n\nh1 {\n  font-size: 2.5rem;\n  margin-bottom: 0.5rem;\n}`,
-    javascript: `// Your JavaScript code here\nconsole.log('Hello from CodeAgent!');\n`,
+    'index.html': `<!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="UTF-8">\n  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n  <title>My Project</title>\n  <link rel="stylesheet" href="style.css">\n</head>\n<body>\n  <h1>Hello World!</h1>\n  <p>Start coding or ask the AI agent to generate code for you.</p>\n  <script src="script.js"><\/script>\n</body>\n</html>`,
+    'style.css': `* {\n  margin: 0;\n  padding: 0;\n  box-sizing: border-box;\n}\n\nbody {\n  font-family: system-ui, sans-serif;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  min-height: 100vh;\n  background: #0a0a0f;\n  color: #e8e8f0;\n}\n\nh1 {\n  font-size: 2.5rem;\n  margin-bottom: 0.5rem;\n}`,
+    'script.js': `// Your JavaScript code here\nconsole.log('Hello from CodeAgent!');\n`,
   },
   editors: {},
   models: [],
   mobileLayout: 'tabbed',
   activeMobileTab: 'chat',
+  sidebarOpen: true,
+  attachedImage: null,
+  chatOpen: true,
 };
 
-// Language map
-const langMap = { html: html(), css: css(), javascript: javascript() };
+// Language map support based on extension
+function getLanguageSupport(filename) {
+  if (filename.endsWith('.html') || filename.endsWith('.htm')) return html();
+  if (filename.endsWith('.css')) return css();
+  if (filename.endsWith('.js') || filename.endsWith('.jsx') || filename.endsWith('.ts')) return javascript();
+  return html(); // Fallback
+}
 
 // ===== Editor Setup =====
-function createEditor(lang) {
+function createEditor(filename) {
   const extensions = [
     lineNumbers(), highlightActiveLineGutter(), highlightSpecialChars(),
     history(), foldGutter(), drawSelection(), indentOnInput(),
@@ -42,11 +58,11 @@ function createEditor(lang) {
     rectangularSelection(), crosshairCursor(), highlightActiveLine(),
     highlightSelectionMatches(), oneDark,
     keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...searchKeymap, ...historyKeymap, ...foldKeymap, ...completionKeymap, indentWithTab]),
-    langMap[lang],
+    getLanguageSupport(filename),
     EditorView.updateListener.of((update) => {
       if (update.docChanged) {
-        state.files[lang] = update.state.doc.toString();
-        if (state.currentView === 'split') updatePreview();
+        state.files[filename] = update.state.doc.toString();
+        if (state.currentView === 'split' || state.currentView === 'preview') updatePreview();
       }
     }),
     EditorView.theme({
@@ -55,42 +71,180 @@ function createEditor(lang) {
     }),
   ];
 
-  const editorState = EditorState.create({ doc: state.files[lang], extensions });
+  const editorState = EditorState.create({ doc: state.files[filename] || '', extensions });
   const view = new EditorView({ state: editorState, parent: document.getElementById('editorContainer') });
-  state.editors[lang] = view;
+  state.editors[filename] = view;
   return view;
 }
 
-function switchFile(lang) {
-  state.currentFile = lang;
-  // Hide all editors, show selected
+function switchFile(filename) {
+  state.currentFile = filename;
+  
+  // Ensure editor is initialized
+  if (!state.editors[filename]) {
+    createEditor(filename);
+  }
+  
+  // Hide all editors, show selected using important property to override CodeMirror styles
   Object.entries(state.editors).forEach(([key, editor]) => {
-    editor.dom.style.display = key === lang ? 'block' : 'none';
+    if (key === filename) {
+      editor.dom.style.setProperty('display', 'flex', 'important');
+    } else {
+      editor.dom.style.setProperty('display', 'none', 'important');
+    }
   });
-  // Update tabs
-  document.querySelectorAll('.file-tab').forEach(tab => {
-    tab.classList.toggle('active', tab.dataset.lang === lang);
+  
+  // Update sidebar active class
+  document.querySelectorAll('.file-item').forEach(item => {
+    item.classList.toggle('active', item.dataset.file === filename);
   });
 }
 
-function setEditorContent(lang, content) {
-  state.files[lang] = content;
-  const editor = state.editors[lang];
+function setEditorContent(filename, content) {
+  state.files[filename] = content;
+  const editor = state.editors[filename];
   if (editor) {
     editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: content } });
+  }
+}
+
+// ===== Sidebar File Explorer =====
+function renderSidebarFiles() {
+  const container = document.getElementById('sidebarFileList');
+  if (!container) return;
+
+  container.innerHTML = '';
+  
+  const folderHeader = document.createElement('div');
+  folderHeader.className = 'folder-header';
+  folderHeader.innerHTML = `
+    <svg class="folder-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+    </svg>
+    <span>PROJECT</span>
+  `;
+  container.appendChild(folderHeader);
+
+  const fileListContainer = document.createElement('div');
+  fileListContainer.className = 'folder-contents';
+  
+  Object.keys(state.files).forEach(filename => {
+    const fileItem = document.createElement('div');
+    fileItem.className = `file-item ${state.currentFile === filename ? 'active' : ''}`;
+    fileItem.dataset.file = filename;
+    
+    // Choose icon based on file extension
+    let icon = '📄';
+    let iconClass = 'file-txt-icon';
+    if (filename.endsWith('.html') || filename.endsWith('.htm')) {
+      icon = '◇';
+      iconClass = 'html-icon';
+    } else if (filename.endsWith('.css')) {
+      icon = '◆';
+      iconClass = 'css-icon';
+    } else if (filename.endsWith('.js') || filename.endsWith('.jsx') || filename.endsWith('.ts')) {
+      icon = '⬡';
+      iconClass = 'js-icon';
+    }
+
+    fileItem.innerHTML = `
+      <span class="tab-icon ${iconClass}">${icon}</span>
+      <span class="file-name-text">${filename}</span>
+      ${['index.html', 'style.css', 'script.js'].includes(filename) ? '' : `<button class="delete-file-btn" data-file="${filename}" title="Delete File">&times;</button>`}
+    `;
+
+    fileItem.addEventListener('click', (e) => {
+      if (e.target.closest('.delete-file-btn')) {
+        e.stopPropagation();
+        deleteFile(filename);
+      } else {
+        switchFile(filename);
+      }
+    });
+
+    fileListContainer.appendChild(fileItem);
+  });
+
+  container.appendChild(fileListContainer);
+}
+
+function handleCreateNewFile() {
+  const filename = prompt("Enter file name (e.g., about.html, utils.js):");
+  if (!filename) return;
+  
+  const cleanName = filename.trim();
+  if (!cleanName) return;
+
+  if (state.files[cleanName]) {
+    alert("File already exists!");
+    return;
+  }
+
+  // Create empty file content
+  let defaultContent = '';
+  if (cleanName.endsWith('.html') || cleanName.endsWith('.htm')) {
+    defaultContent = `<!-- ${cleanName} -->\n`;
+  } else if (cleanName.endsWith('.css')) {
+    defaultContent = `/* ${cleanName} styling */\n`;
+  } else if (cleanName.endsWith('.js')) {
+    defaultContent = `// ${cleanName} code\n`;
+  }
+
+  state.files[cleanName] = defaultContent;
+  renderSidebarFiles();
+  switchFile(cleanName);
+}
+
+function deleteFile(filename) {
+  if (['index.html', 'style.css', 'script.js'].includes(filename)) return;
+  
+  if (confirm(`Are you sure you want to delete ${filename}?`)) {
+    if (state.currentFile === filename) {
+      switchFile('index.html');
+    }
+    
+    const view = state.editors[filename];
+    if (view) {
+      view.destroy();
+      delete state.editors[filename];
+    }
+    delete state.files[filename];
+    
+    renderSidebarFiles();
   }
 }
 
 // ===== Preview =====
 function updatePreview() {
   const frame = document.getElementById('previewFrame');
-  const htmlContent = state.files.html;
-  const cssContent = state.files.css;
-  const jsContent = state.files.javascript;
+  const htmlContent = state.files['index.html'] || '';
+  const cssContent = state.files['style.css'] || '';
+  const jsContent = state.files['script.js'] || '';
 
-  const fullHTML = htmlContent
+  // Start with index.html as layout
+  let fullHTML = htmlContent
     .replace(/<link[^>]*href=["']style\.css["'][^>]*>/i, `<style>${cssContent}</style>`)
     .replace(/<script[^>]*src=["']script\.js["'][^>]*><\/script>/i, `<script>${jsContent}<\/script>`);
+
+  // Inject any other custom CSS/JS files created by the user or agent
+  Object.entries(state.files).forEach(([name, content]) => {
+    if (name === 'index.html' || name === 'style.css' || name === 'script.js') return;
+    if (name.endsWith('.css')) {
+      const regex = new RegExp(`<link[^>]*href=["']${name}["'][^>]*>`, 'i');
+      if (regex.test(fullHTML)) {
+        fullHTML = fullHTML.replace(regex, `<style>${content}</style>`);
+      } else {
+        fullHTML = fullHTML.replace('</head>', `  <style data-file="${name}">\n${content}\n  </style>\n</head>`);
+      }
+    } else if (name.endsWith('.js')) {
+      const regex = new RegExp(`<script[^>]*src=["']${name}["'][^>]*><\\/script>`, 'i');
+      if (regex.test(fullHTML)) {
+        fullHTML = fullHTML.replace(regex, `<script>${content}<\/script>`);
+      } else {
+        fullHTML = fullHTML.replace('</body>', `  <script data-file="${name}">\n${content}\n  <\/script>\n</body>`);
+      }
+    }
+  });
 
   const blob = new Blob([fullHTML], { type: 'text/html' });
   frame.src = URL.createObjectURL(blob);
@@ -134,42 +288,39 @@ async function loadModels() {
 }
 
 function renderModelList() {
-  const list = document.getElementById('modelList');
+  const list = document.getElementById('modelListInline');
+  if (!list) return;
   const categories = { recommended: '⚡ Recommended', fast: '🚀 Fast', reasoning: '🧠 Reasoning' };
   let html = '';
 
   Object.entries(categories).forEach(([cat, label]) => {
     const models = state.models.filter(m => m.category === cat);
     if (!models.length) return;
-    html += `<div class="model-category">${label}</div>`;
+    html += `<div class="dropdown-header">${label}</div>`;
     models.forEach(m => {
       const active = m.id === state.currentModel ? 'active' : '';
-      const badgeClass = `badge-${cat}`;
-      html += `<div class="model-option ${active}" data-model-id="${m.id}">
-        <div class="model-option-info">
-          <div class="model-option-name">${m.name}</div>
-          <div class="model-option-desc">${m.description} · ${m.provider}</div>
-        </div>
-        <span class="model-option-badge ${badgeClass}">${cat}</span>
+      html += `<div class="model-item ${active}" data-model-id="${m.id}">
+        <div class="model-item-title">${m.name}</div>
+        <div class="model-item-desc">${m.description} · ${m.provider}</div>
       </div>`;
     });
   });
 
   list.innerHTML = html;
-  list.querySelectorAll('.model-option').forEach(opt => {
+  list.querySelectorAll('.model-item').forEach(opt => {
     opt.addEventListener('click', () => {
       state.currentModel = opt.dataset.modelId;
       const model = state.models.find(m => m.id === state.currentModel);
-      document.getElementById('currentModelName').textContent = model?.name || state.currentModel;
-      document.getElementById('modelDropdown').classList.remove('open');
+      document.getElementById('currentModelNameInline').textContent = model?.name || state.currentModel;
+      document.getElementById('modelDropdownInline').classList.remove('open');
       renderModelList();
     });
   });
 }
 
 // ===== Chat =====
-function addMessage(role, content) {
-  state.messages.push({ role, content });
+function addMessage(role, content, image = null) {
+  state.messages.push({ role, content, image });
   renderMessages();
 }
 
@@ -191,6 +342,9 @@ function renderMessages() {
 
     // Parse markdown for assistant messages
     let contentHTML = msg.role === 'assistant' ? parseMessageContent(msg.content) : escapeHtml(msg.content);
+    
+    // Add image attachment bubble if present
+    const attachmentHTML = msg.image ? `<div class="message-attachment"><img src="${msg.image}" alt="Attached Image" /></div>` : '';
 
     div.innerHTML = `
       <div class="message-avatar">${avatar}</div>
@@ -199,7 +353,10 @@ function renderMessages() {
           <span class="message-sender">${sender}</span>
           <span class="message-time">${time}</span>
         </div>
-        <div class="message-content">${contentHTML}</div>
+        <div class="message-content">
+          ${contentHTML}
+          ${attachmentHTML}
+        </div>
       </div>`;
 
     container.appendChild(div);
@@ -211,7 +368,9 @@ function renderMessages() {
       btn.addEventListener('click', () => {
         const code = wrapper.querySelector('code').textContent;
         const lang = btn.dataset.lang || 'html';
-        applyCodeToEditor(code, lang);
+        const filename = extractFilename(code, lang);
+        
+        applyCodeToEditor(code, filename);
       });
     });
     wrapper.querySelectorAll('.copy-code-btn').forEach(btn => {
@@ -233,13 +392,13 @@ function parseMessageContent(content) {
   renderer.code = function ({ text, lang }) {
     const language = lang || 'text';
     const escapedCode = escapeHtml(text);
-    const targetLang = detectTargetLang(language);
+    const filename = extractFilename(text, language);
     return `<div class="code-block-wrapper">
       <div class="code-block-header">
-        <span class="code-lang">${language}</span>
+        <span class="code-lang">${filename}</span>
         <div class="code-actions">
           <button class="code-action-btn copy-code-btn">Copy</button>
-          <button class="code-action-btn apply-btn" data-lang="${targetLang}">▶ Apply to Editor</button>
+          <button class="code-action-btn apply-btn" data-lang="${language}">▶ Apply to Editor</button>
         </div>
       </div>
       <pre><code class="language-${language}">${escapedCode}</code></pre>
@@ -250,21 +409,43 @@ function parseMessageContent(content) {
   return marked.parse(content);
 }
 
-function detectTargetLang(lang) {
-  if (['html', 'htm'].includes(lang)) return 'html';
-  if (['css', 'scss', 'sass'].includes(lang)) return 'css';
-  if (['javascript', 'js', 'jsx', 'ts', 'typescript'].includes(lang)) return 'javascript';
-  return 'html'; // default
+function extractFilename(blockCode, defaultLang) {
+  const firstLine = blockCode.split('\n')[0].trim();
+  
+  // 1. Check for HTML comment: <!-- filename.ext -->
+  const htmlMatch = firstLine.match(/<!--\s*([\w\-.]+\.[\w]+)\s*-->/i);
+  if (htmlMatch) return htmlMatch[1];
+  
+  // 2. Check for CSS/JS comment: /* filename.ext */ or // filename.ext
+  const cssMatch = firstLine.match(/\/\*\s*([\w\-.]+\.[\w]+)\s*\*\//i);
+  if (cssMatch) return cssMatch[1];
+  
+  const jsMatch = firstLine.match(/\/\/\s*([\w\-.]+\.[\w]+)/i);
+  if (jsMatch) return jsMatch[1];
+
+  // 3. Fallback to standard names based on language
+  return detectTargetLang(defaultLang);
 }
 
-function applyCodeToEditor(code, lang) {
-  setEditorContent(lang, code);
-  switchFile(lang);
+function detectTargetLang(lang) {
+  if (['html', 'htm'].includes(lang)) return 'index.html';
+  if (['css', 'scss', 'sass'].includes(lang)) return 'style.css';
+  if (['javascript', 'js', 'jsx', 'ts', 'typescript'].includes(lang)) return 'script.js';
+  return 'index.html'; // default
+}
+
+function applyCodeToEditor(code, filename) {
+  if (!state.files[filename]) {
+    state.files[filename] = '';
+  }
+  setEditorContent(filename, code);
+  renderSidebarFiles();
+  switchFile(filename);
   switchView('editor');
 
   // Flash status
   const status = document.getElementById('statusIndicator');
-  status.querySelector('.status-text').textContent = `Applied to ${lang}`;
+  status.querySelector('.status-text').textContent = `Applied to ${filename}`;
   status.querySelector('.status-dot').style.background = 'var(--accent-cyan)';
   setTimeout(() => {
     status.querySelector('.status-text').textContent = 'Ready';
@@ -280,9 +461,16 @@ function escapeHtml(str) {
 
 // ===== Streaming Chat =====
 async function sendMessage(text) {
-  if (state.isGenerating || !text.trim()) return;
+  if (state.isGenerating || (!text.trim() && !state.attachedImage)) return;
 
-  addMessage('user', text);
+  const currentImage = state.attachedImage;
+  
+  // Reset attachment UI
+  state.attachedImage = null;
+  const attachmentPreview = document.getElementById('attachmentPreview');
+  if (attachmentPreview) attachmentPreview.style.display = 'none';
+
+  addMessage('user', text, currentImage);
   state.isGenerating = true;
   document.getElementById('sendBtn').disabled = true;
 
@@ -308,7 +496,20 @@ async function sendMessage(text) {
   chatContainer.scrollTop = chatContainer.scrollHeight;
 
   try {
-    const apiMessages = state.messages.map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.content }));
+    // Map messages supporting multimodal base64 image objects when vision models are active
+    const apiMessages = state.messages.map(m => {
+      const role = m.role === 'user' ? 'user' : 'assistant';
+      if (m.image) {
+        return {
+          role,
+          content: [
+            { type: 'text', text: m.content || 'Attached Image' },
+            { type: 'image_url', image_url: { url: m.image } }
+          ]
+        };
+      }
+      return { role, content: m.content };
+    });
 
     const response = await fetch('/api/chat', {
       method: 'POST',
@@ -382,27 +583,38 @@ function autoApplyCode(content) {
   if (blocks.length === 1) {
     // Single block - auto apply
     const block = blocks[0];
-    const target = detectTargetLang(block.lang);
+    const filename = extractFilename(block.code, block.lang);
+
+    if (!state.files[filename]) {
+      state.files[filename] = '';
+    }
 
     // Check if it's a complete HTML with embedded styles/scripts
-    if (target === 'html' && block.code.includes('<!DOCTYPE') || block.code.includes('<html')) {
-      setEditorContent('html', block.code);
-      // Extract and set CSS/JS if embedded
-      const styleMatch = block.code.match(/<style[^>]*>([\s\S]*?)<\/style>/i);
-      const scriptMatch = block.code.match(/<script[^>]*>([\s\S]*?)<\/script>/i);
-      // Don't split - keep as single file
+    if (filename === 'index.html' && (block.code.includes('<!DOCTYPE') || block.code.includes('<html'))) {
+      setEditorContent('index.html', block.code);
     } else {
-      setEditorContent(target, block.code);
+      setEditorContent(filename, block.code);
     }
-    switchFile(target === 'html' ? 'html' : target);
+    
+    renderSidebarFiles();
+    switchFile(filename);
     if (state.currentView === 'editor') switchView('split');
     updatePreview();
   } else if (blocks.length > 1) {
     // Multiple blocks - apply each to its target
     blocks.forEach(block => {
-      const target = detectTargetLang(block.lang);
-      setEditorContent(target, block.code);
+      const filename = extractFilename(block.code, block.lang);
+      if (!state.files[filename]) {
+        state.files[filename] = '';
+      }
+      setEditorContent(filename, block.code);
     });
+    
+    renderSidebarFiles();
+    
+    // Switch to the first block's file
+    const firstFilename = extractFilename(blocks[0].code, blocks[0].lang);
+    switchFile(firstFilename);
     switchView('split');
     updatePreview();
   }
@@ -442,34 +654,179 @@ function initResizer() {
 
 // ===== Event Listeners =====
 function initEvents() {
-  // File tabs
-  document.querySelectorAll('.file-tab').forEach(tab => {
-    tab.addEventListener('click', () => switchFile(tab.dataset.lang));
-  });
+  // Sidebar toggler
+  const toggleSidebarBtn = document.getElementById('toggleSidebarBtn');
+  const fileExplorer = document.getElementById('fileExplorer');
+  
+  if (toggleSidebarBtn && fileExplorer) {
+    // Set initial active/collapsed states depending on viewport width
+    if (window.innerWidth <= 768) {
+      state.sidebarOpen = false;
+      fileExplorer.classList.add('collapsed');
+      toggleSidebarBtn.classList.remove('active');
+    } else {
+      state.sidebarOpen = true;
+      fileExplorer.classList.remove('collapsed');
+      toggleSidebarBtn.classList.add('active');
+    }
+
+    toggleSidebarBtn.addEventListener('click', () => {
+      state.sidebarOpen = !state.sidebarOpen;
+      if (state.sidebarOpen) {
+        fileExplorer.classList.remove('collapsed');
+        toggleSidebarBtn.classList.add('active');
+      } else {
+        fileExplorer.classList.add('collapsed');
+        toggleSidebarBtn.classList.remove('active');
+      }
+    });
+  }
+
+  // Chat toggler
+  const toggleChatBtn = document.getElementById('toggleChatBtn');
+  const closeChatBtn = document.getElementById('closeChatBtn');
+  const chatPanel = document.getElementById('chatPanel');
+  const panelResizer = document.getElementById('panelResizer');
+
+  // Set initial state
+  state.chatOpen = true;
+  if (toggleChatBtn) {
+    toggleChatBtn.classList.add('active');
+  }
+
+  function setChatVisibility(isOpen) {
+    state.chatOpen = isOpen;
+    if (state.chatOpen) {
+      chatPanel?.classList.remove('collapsed');
+      panelResizer?.classList.remove('collapsed');
+      toggleChatBtn?.classList.add('active');
+    } else {
+      chatPanel?.classList.add('collapsed');
+      panelResizer?.classList.add('collapsed');
+      toggleChatBtn?.classList.remove('active');
+    }
+  }
+
+  if (toggleChatBtn) {
+    toggleChatBtn.addEventListener('click', () => {
+      setChatVisibility(!state.chatOpen);
+    });
+  }
+
+  if (closeChatBtn) {
+    closeChatBtn.addEventListener('click', () => {
+      setChatVisibility(false);
+    });
+  }
+
+  // Sidebar new file button
+  const sidebarNewFileBtn = document.getElementById('sidebarNewFileBtn');
+  if (sidebarNewFileBtn) {
+    sidebarNewFileBtn.addEventListener('click', handleCreateNewFile);
+  }
 
   // View tabs
   document.querySelectorAll('.view-tab').forEach(tab => {
     tab.addEventListener('click', () => switchView(tab.dataset.view));
   });
 
-  // Mode toggle
-  document.querySelectorAll('.mode-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      state.currentMode = btn.dataset.mode;
-      document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
+  // Model select inline dropdown toggle
+  const modelSelectBtnInline = document.getElementById('modelSelectBtnInline');
+  const modelDropdownInline = document.getElementById('modelDropdownInline');
+  if (modelSelectBtnInline && modelDropdownInline) {
+    modelSelectBtnInline.addEventListener('click', (e) => {
+      e.stopPropagation();
+      modelDropdownInline.classList.toggle('open');
+      document.getElementById('modeDropdownInline')?.classList.remove('open');
+    });
+  }
+
+  // Mode select inline dropdown toggle
+  const modeSelectBtnInline = document.getElementById('modeSelectBtnInline');
+  const modeDropdownInline = document.getElementById('modeDropdownInline');
+  if (modeSelectBtnInline && modeDropdownInline) {
+    modeSelectBtnInline.addEventListener('click', (e) => {
+      e.stopPropagation();
+      modeDropdownInline.classList.toggle('open');
+      document.getElementById('modelDropdownInline')?.classList.remove('open');
+    });
+  }
+
+  // Close all inline dropdowns when clicking anywhere outside
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.model-selector-inline')) {
+      document.getElementById('modelDropdownInline')?.classList.remove('open');
+    }
+    if (!e.target.closest('.mode-selector-inline')) {
+      document.getElementById('modeDropdownInline')?.classList.remove('open');
+    }
+  });
+
+  // Inline Mode option selectors
+  document.querySelectorAll('#modeDropdownInline .mode-option-item').forEach(item => {
+    item.addEventListener('click', () => {
+      state.currentMode = item.dataset.mode;
+      
+      // Update inline dropdown title and icons
+      let icon = '🤖';
+      let label = 'Agent';
+      if (state.currentMode === 'chat') {
+        icon = '💬';
+        label = 'Chat';
+      } else if (state.currentMode === 'auto') {
+        icon = '⚡';
+        label = 'Auto';
+      }
+      
+      const iconSpan = modeSelectBtnInline.querySelector('.mode-icon');
+      const textSpan = modeSelectBtnInline.querySelector('.mode-name');
+      if (iconSpan) iconSpan.textContent = icon;
+      if (textSpan) textSpan.textContent = label;
+
+      // Update active list selection class
+      document.querySelectorAll('#modeDropdownInline .mode-option-item').forEach(el => {
+        el.classList.toggle('active', el.dataset.mode === state.currentMode);
+      });
+
+      modeDropdownInline.classList.remove('open');
     });
   });
 
-  // Model selector
-  document.getElementById('modelSelectBtn').addEventListener('click', () => {
-    document.getElementById('modelDropdown').classList.toggle('open');
-  });
-  document.addEventListener('click', (e) => {
-    if (!e.target.closest('.model-selector')) {
-      document.getElementById('modelDropdown').classList.remove('open');
-    }
-  });
+  // Image Attachment Upload Trigger
+  const attachBtn = document.getElementById('attachBtn');
+  const imageAttachmentInput = document.getElementById('imageAttachmentInput');
+  const attachmentPreview = document.getElementById('attachmentPreview');
+  const attachmentImg = document.getElementById('attachmentImg');
+  const removeAttachmentBtn = document.getElementById('removeAttachmentBtn');
+
+  if (attachBtn && imageAttachmentInput) {
+    attachBtn.addEventListener('click', () => {
+      imageAttachmentInput.click();
+    });
+
+    imageAttachmentInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (file && file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          state.attachedImage = event.target.result;
+          if (attachmentImg) attachmentImg.src = event.target.result;
+          if (attachmentPreview) attachmentPreview.style.display = 'flex';
+        };
+        reader.readAsDataURL(file);
+      }
+      // Reset input value to allow selecting same file again
+      imageAttachmentInput.value = '';
+    });
+  }
+
+  if (removeAttachmentBtn) {
+    removeAttachmentBtn.addEventListener('click', () => {
+      state.attachedImage = null;
+      if (attachmentPreview) attachmentPreview.style.display = 'none';
+      if (attachmentImg) attachmentImg.src = '';
+    });
+  }
 
   // Chat input
   const chatInput = document.getElementById('chatInput');
@@ -548,9 +905,9 @@ function initEvents() {
 }
 
 function downloadProject() {
-  const htmlContent = state.files.html;
-  const cssContent = state.files.css;
-  const jsContent = state.files.javascript;
+  const htmlContent = state.files['index.html'] || '';
+  const cssContent = state.files['style.css'] || '';
+  const jsContent = state.files['script.js'] || '';
 
   // Create a single HTML file with embedded CSS/JS
   let fullHTML = htmlContent;
@@ -560,6 +917,16 @@ function downloadProject() {
   if (!fullHTML.includes('<script') && jsContent.trim()) {
     fullHTML = fullHTML.replace('</body>', `  <script>\n${jsContent}\n  <\/script>\n</body>`);
   }
+
+  // Inject any other files into download
+  Object.entries(state.files).forEach(([name, content]) => {
+    if (name === 'index.html' || name === 'style.css' || name === 'script.js') return;
+    if (name.endsWith('.css')) {
+      fullHTML = fullHTML.replace('</head>', `  <style data-file="${name}">\n${content}\n  </style>\n</head>`);
+    } else if (name.endsWith('.js')) {
+      fullHTML = fullHTML.replace('</body>', `  <script data-file="${name}">\n${content}\n  <\/script>\n</body>`);
+    }
+  });
 
   const blob = new Blob([fullHTML], { type: 'text/html' });
   const url = URL.createObjectURL(blob);
@@ -634,9 +1001,10 @@ function switchMobileTab(tab) {
 
 // ===== Init =====
 function init() {
-  // Create editors for each language
-  ['html', 'css', 'javascript'].forEach(lang => createEditor(lang));
-  switchFile('html');
+  // Create editors for core files
+  ['index.html', 'style.css', 'script.js'].forEach(filename => createEditor(filename));
+  switchFile('index.html');
+  renderSidebarFiles();
 
   initResizer();
   initEvents();
