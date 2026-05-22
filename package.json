@@ -25,9 +25,7 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "groq-sdk": "^0.15.0",
-    "marked": "^15.0.7"
-  },
-  "devDependencies": {
+    "marked": "^15.0.7",
     "vite": "^6.3.5"
   }
 }
