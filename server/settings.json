@@ -1,0 +1,39 @@
+{
+  "models": [
+    {
+      "id": "llama-3.3-70b-versatile",
+      "name": "LLaMA 3.3 70B",
+      "provider": "Meta",
+      "description": "Best for versatile coding tasks",
+      "category": "recommended"
+    },
+    {
+      "id": "qwen/qwen3-32b",
+      "name": "Qwen3 32B",
+      "provider": "Alibaba",
+      "description": "Strong reasoning & code generation",
+      "category": "recommended"
+    },
+    {
+      "id": "llama-3.1-8b-instant",
+      "name": "LLaMA 3.1 8B",
+      "provider": "Meta",
+      "description": "Ultra-fast responses",
+      "category": "fast"
+    },
+    {
+      "id": "deepseek-chat",
+      "name": "DeepSeek V4 Flash",
+      "provider": "DeepSeek",
+      "description": "Fast & efficient full-stack coding",
+      "category": "deepseek"
+    },
+    {
+      "id": "deepseek-reasoner",
+      "name": "DeepSeek V4 Pro",
+      "provider": "DeepSeek",
+      "description": "Advanced reasoning & architecture",
+      "category": "deepseek"
+    }
+  ]
+}

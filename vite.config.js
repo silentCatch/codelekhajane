@@ -17,6 +17,8 @@ export default defineConfig({
       input: {
         main: 'index.html',
         mobile: 'mobile.html',
+        training: 'training.html',
+        settings: 'settings.html',
       },
     },
   },

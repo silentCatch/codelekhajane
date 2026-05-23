@@ -27,7 +27,8 @@ const state = {
     'index.html': `<!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="UTF-8">\n  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n  <title>My Project</title>\n  <link rel="stylesheet" href="style.css">\n</head>\n<body>\n  <h1>Hello World!</h1>\n  <p>Start coding or ask the AI agent to generate code for you.</p>\n  <script src="script.js"><\/script>\n</body>\n</html>`,
     'style.css': `* {\n  margin: 0;\n  padding: 0;\n  box-sizing: border-box;\n}\n\nbody {\n  font-family: system-ui, sans-serif;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  min-height: 100vh;\n  background: #0a0a0f;\n  color: #e8e8f0;\n}\n\nh1 {\n  font-size: 2.5rem;\n  margin-bottom: 0.5rem;\n}`,
     'script.js': `// Your JavaScript code here\nconsole.log('Hello from CodeAgent!');\n`,
-  }
+  },
+  currentSessionId: null
 };
 
 let editorView = null;
@@ -49,7 +50,7 @@ function parseMessageContent(text) {
   let htmlText = escapeHtml(text);
 
   // Fenced Code blocks
-  const codeBlockRegex = /```(\w*)\n([\s\S]*?)```/g;
+  const codeBlockRegex = /```(\w*)\r?\n([\s\S]*?)```/g;
   htmlText = htmlText.replace(codeBlockRegex, (match, lang, code) => {
     return `<pre><code class="language-${lang || 'plaintext'}">${code}</code></pre>`;
   });
@@ -86,6 +87,7 @@ function initEditor() {
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
           state.files[state.currentFile] = update.state.doc.toString();
+          saveCurrentSession();
         }
       })
     ]
@@ -100,25 +102,48 @@ function initEditor() {
 function switchFile(filename) {
   state.currentFile = filename;
   document.getElementById('mobileActiveFileName').textContent = filename;
+  
+  // Ensure the file exists in state
+  if (state.files[filename] === undefined) {
+    state.files[filename] = '';
+  }
+
+  // Sync selector dropdown
   const selector = document.getElementById('mobileFileSelector');
-  if (selector) selector.value = filename;
+  if (selector) {
+    // If filename is not in selector options, rebuild it
+    let optionExists = false;
+    for (let i = 0; i < selector.options.length; i++) {
+      if (selector.options[i].value === filename) {
+        optionExists = true;
+        break;
+      }
+    }
+    if (!optionExists) {
+      renderFileSelector();
+    }
+    selector.value = filename;
+  }
 
   if (editorView) {
-    const languageConf = {
-      'index.html': html(),
-      'style.css': css(),
-      'script.js': javascript()
-    };
+    const ext = filename.split('.').pop()?.toLowerCase();
+    let langSupport = html();
+    if (ext === 'css') {
+      langSupport = css();
+    } else if (ext === 'js' || ext === 'jsx' || ext === 'ts' || ext === 'tsx') {
+      langSupport = javascript();
+    }
 
     editorView.setState(EditorState.create({
       doc: state.files[filename],
       extensions: [
         lineNumbers(),
         oneDark,
-        languageConf[filename] || html(),
+        langSupport,
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
             state.files[state.currentFile] = update.state.doc.toString();
+            saveCurrentSession();
           }
         })
       ]
@@ -126,7 +151,25 @@ function switchFile(filename) {
   }
 }
 
-// ===== Interactive Preview (Self-Contained Blob Compilation) =====
+// ===== Dynamic File Selector Populate =====
+function renderFileSelector() {
+  const selector = document.getElementById('mobileFileSelector');
+  if (!selector) return;
+
+  const currentSelection = state.currentFile;
+  selector.innerHTML = '';
+
+  Object.keys(state.files).forEach(filename => {
+    const opt = document.createElement('option');
+    opt.value = filename;
+    opt.textContent = filename;
+    selector.appendChild(opt);
+  });
+
+  selector.value = currentSelection;
+}
+
+// ===== Interactive Preview (Dynamic Multi-File Blob Compilation) =====
 function updatePreview() {
   const iframe = document.getElementById('mobilePreviewFrame');
   if (!iframe) return;
@@ -135,24 +178,32 @@ function updatePreview() {
   const cssContent = state.files['style.css'] || '';
   const jsContent = state.files['script.js'] || '';
 
-  // Clean injection and dynamic compilation
-  let parsed = htmlContent;
+  // Start with index.html as layout
+  let fullHTML = htmlContent
+    .replace(/<link[^>]*href=["']style\.css["'][^>]*>/i, `<style>${cssContent}</style>`)
+    .replace(/<script[^>]*src=["']script\.js["'][^>]*><\/script>/i, `<script>${jsContent}<\/script>`);
 
-  const cssTag = `<style>${cssContent}</style>`;
-  if (parsed.includes('</head>')) {
-    parsed = parsed.replace('</head>', `${cssTag}</head>`);
-  } else {
-    parsed = cssTag + parsed;
-  }
+  // Inject any other custom CSS/JS files
+  Object.entries(state.files).forEach(([name, content]) => {
+    if (name === 'index.html' || name === 'style.css' || name === 'script.js') return;
+    if (name.endsWith('.css')) {
+      const regex = new RegExp(`<link[^>]*href=["']${name}["'][^>]*>`, 'i');
+      if (regex.test(fullHTML)) {
+        fullHTML = fullHTML.replace(regex, `<style>${content}</style>`);
+      } else {
+        fullHTML = fullHTML.replace('</head>', `  <style data-file="${name}">\n${content}\n  </style>\n</head>`);
+      }
+    } else if (name.endsWith('.js')) {
+      const regex = new RegExp(`<script[^>]*src=["']${name}["'][^>]*><\\/script>`, 'i');
+      if (regex.test(fullHTML)) {
+        fullHTML = fullHTML.replace(regex, `<script>${content}<\/script>`);
+      } else {
+        fullHTML = fullHTML.replace('</body>', `  <script data-file="${name}">\n${content}\n  <\/script>\n</body>`);
+      }
+    }
+  });
 
-  const jsTag = `<script>${jsContent}<\/script>`;
-  if (parsed.includes('</body>')) {
-    parsed = parsed.replace('</body>', `${jsTag}</body>`);
-  } else {
-    parsed = parsed + jsTag;
-  }
-
-  const blob = new Blob([parsed], { type: 'text/html' });
+  const blob = new Blob([fullHTML], { type: 'text/html' });
   iframe.src = URL.createObjectURL(blob);
 }
 
@@ -213,21 +264,32 @@ async function loadModels() {
   }
 }
 
+function isDeepSeekModel(modelId) {
+  return modelId && modelId.startsWith('deepseek-');
+}
+
 function renderModelList() {
   const list = document.getElementById('modelListInline');
   const dropdownMenu = document.getElementById('modelDropdownInline');
   if (!list) return;
-  const categories = { recommended: '⚡ Recommended', fast: '🚀 Fast', reasoning: '🧠 Reasoning' };
+
+  const categories = {
+    recommended: '⚡ Recommended',
+    fast: '🚀 Fast',
+    reasoning: '🧠 Reasoning',
+    deepseek: '🔮 DeepSeek'
+  };
   let htmlText = '';
 
   Object.entries(categories).forEach(([cat, label]) => {
     const models = state.models.filter(m => m.category === cat);
     if (!models.length) return;
-    htmlText += `<div class="dropdown-header">${label}</div>`;
+    htmlText += `<div class="dropdown-header ${cat === 'deepseek' ? 'deepseek-header' : ''}">${label}</div>`;
     models.forEach(m => {
       const active = m.id === state.currentModel ? 'active' : '';
-      htmlText += `<div class="model-item ${active}" data-model-id="${m.id}">
-        <div class="model-item-title">${m.name}</div>
+      const isDS = m.category === 'deepseek';
+      htmlText += `<div class="model-item ${active} ${isDS ? 'deepseek-model-item' : ''}" data-model-id="${m.id}">
+        <div class="model-item-title">${m.name}${isDS ? '<span class="ds-badge">DS</span>' : ''}</div>
         <div class="model-item-desc">${m.description} · ${m.provider}</div>
       </div>`;
     });
@@ -242,7 +304,8 @@ function renderModelList() {
       // Update chip icon
       const iconSpan = document.getElementById('modelSelectBtnInline').querySelector('.chip-icon');
       if (iconSpan) {
-        if (model?.category === 'reasoning') iconSpan.textContent = '🧠';
+        if (isDeepSeekModel(state.currentModel)) iconSpan.textContent = '🔮';
+        else if (model?.category === 'reasoning') iconSpan.textContent = '🧠';
         else if (model?.category === 'fast') iconSpan.textContent = '🚀';
         else iconSpan.textContent = '⚡';
       }
@@ -257,10 +320,109 @@ function renderModelList() {
   });
 }
 
+// ===== Project Stack Suggestion Templates =====
+const PROJECT_STACKS = [
+  {
+    id: 'react',
+    name: 'React',
+    icon: `<svg viewBox="0 0 24 24" width="24" height="24"><circle cx="12" cy="12" r="2.5" fill="#61DAFB"/><ellipse cx="12" cy="12" rx="9" ry="3.5" stroke="#61DAFB" stroke-width="1" fill="none"/><ellipse cx="12" cy="12" rx="9" ry="3.5" stroke="#61DAFB" stroke-width="1" fill="none" transform="rotate(60 12 12)"/><ellipse cx="12" cy="12" rx="9" ry="3.5" stroke="#61DAFB" stroke-width="1" fill="none" transform="rotate(120 12 12)"/></svg>`,
+    description: 'CDN React + App.jsx UI Component',
+    color: '#61DAFB',
+    prompt: `Generate a complete React-based project. You MUST output MULTIPLE separate code blocks. Make sure to put the exact filename comment on the first line of each code block (e.g., \`// App.jsx\` or \`<!-- index.html -->\`).\n1. \`\`\`html for index.html (include CDN links for React, ReactDOM, Babel, and import src="App.jsx" as text/html/babel)\n2. \`\`\`jsx for App.jsx (main React component with useState, useEffect)\n3. \`\`\`css for style.css (modern styling)\n4. \`\`\`json for package.json\nDo NOT write React code in script.js. Write it in App.jsx. Make it a complete, working React app.`,
+  },
+  {
+    id: 'vue',
+    name: 'Vue.js',
+    icon: `<svg viewBox="0 0 24 24" width="24" height="24"><path d="M2 3h4l6 11L18 3h4L12 21 2 3z" fill="#41B883"/><path d="M6.5 3H12l0 0h5.5L12 14.5 6.5 3z" fill="#35495E"/></svg>`,
+    description: 'CDN Vue.js core templates',
+    color: '#41B883',
+    prompt: `Generate a complete Vue.js-based project. You MUST output MULTIPLE separate code blocks. Make sure to put the exact filename comment on the first line of each code block (e.g., \`// main.js\` or \`<!-- index.html -->\`).\n1. \`\`\`html for index.html (include Vue CDN and load main.js)\n2. \`\`\`javascript for main.js (Vue app setup with reactive data)\n3. \`\`\`css for style.css (modern styling)\n4. \`\`\`json for package.json\nMake it a complete, working Vue.js app.`,
+  },
+  {
+    id: 'node',
+    name: 'Node.js',
+    icon: `<svg viewBox="0 0 24 24" width="24" height="24"><path d="M12 2l8.5 5v10L12 22l-8.5-5V7L12 2z" fill="#68A063" opacity="0.2" stroke="#68A063" stroke-width="1.5"/><text x="12" y="14.5" text-anchor="middle" fill="#68A063" font-size="7" font-weight="bold" font-family="sans-serif">JS</text></svg>`,
+    description: 'Express web server structure',
+    color: '#68A063',
+    prompt: `Generate a complete Node.js/Express-based full-stack project. You MUST output MULTIPLE separate code blocks. Make sure to put the exact filename comment on the first line of each code block (e.g., \`// server.js\` or \`<!-- index.html -->\`).\n1. \`\`\`javascript for server.js (Express server with routes)\n2. \`\`\`javascript for routes.js (API router)\n3. \`\`\`html for index.html (frontend UI client)\n4. \`\`\`css for style.css (modern styling)\n5. \`\`\`json for package.json (with express dependency)\nMake it a complete working Node.js server.`,
+  },
+  {
+    id: 'python',
+    name: 'Python Flask',
+    icon: `<svg viewBox="0 0 24 24" width="24" height="24"><path d="M11.9 3C7.5 3 8 4.8 8 4.8v2h4v.6H6.5S3 7 3 11.5c0 4.5 3 4.3 3 4.3h1.8v-2.1s-.1-3 3-3h5.4s2.8.1 2.8-2.7V5.5S19.5 3 11.9 3zm-2 1.5a.9.9 0 110 1.8.9.9 0 010-1.8z" fill="#3776AB"/><path d="M12.1 21c4.4 0 3.9-1.8 3.9-1.8v-2h-4v-.6h5.5s3.5.4 3.5-4.1c0-4.5-3-4.3-3-4.3h-1.8v2.1s.1 3-3 3H8.8s-2.8-.1-2.8 2.7v2.5S5.5 21 12.1 21zm2-1.5a.9.9 0 110-1.8.9.9 0 010 1.8z" fill="#FFD43B"/></svg>`,
+    description: 'Flask backend, template, static files',
+    color: '#3776AB',
+    prompt: `Generate a complete Python Flask-based full-stack project. You MUST output MULTIPLE separate code blocks. Make sure to put the exact filename comment on the first line of each code block (e.g., \`# app.py\` or \`<!-- templates/index.html -->\`).\n1. \`\`\`python for app.py (Flask app with routes)\n2. \`\`\`python for requirements.txt (flask)\n3. \`\`\`html for templates/index.html (Jinja HTML template)\n4. \`\`\`css for static/style.css (Flask static stylesheet)\nMake it a complete working Flask application.`,
+  },
+];
+
+function showProjectSuggestionCards(userPrompt) {
+  state.pendingStackSelection = true;
+  state.pendingUserPrompt = userPrompt;
+
+  const chatContainer = document.getElementById('chatMessages');
+
+  // Create suggestion card container
+  const suggestDiv = document.createElement('div');
+  suggestDiv.className = 'message assistant';
+  suggestDiv.id = 'projectSuggestionCards';
+  suggestDiv.innerHTML = `
+    <div class="message-avatar">🔮</div>
+    <div class="message-body">
+      <div class="message-header">
+        <span class="message-sender" style="color:#7c6aef;">DeepSeek Agent</span>
+      </div>
+      <div class="message-content">
+        <p class="suggestion-intro">Select your preferred tech stack for this full-stack project:</p>
+        <div class="stack-cards-grid" style="display:flex; flex-direction:column; gap:8px; margin: 10px 0;">
+          ${PROJECT_STACKS.map(stack => `
+            <button class="stack-card" data-stack-id="${stack.id}" style="--stack-color:${stack.color}; display:flex; align-items:center; gap:10px; width:100%; text-align:left; background:rgba(255,255,255,0.02); border:1px solid var(--border); padding:10px; border-radius:var(--radius-md); color:#fff; cursor:pointer;">
+              <div class="stack-card-icon" style="background:rgba(255,255,255,0.04); padding:4px; border-radius:4px;">${stack.icon}</div>
+              <div class="stack-card-info" style="display:flex; flex-direction:column; flex:1;">
+                <span class="stack-card-name" style="font-size:12px; font-weight:600;">${stack.name}</span>
+                <span class="stack-card-desc" style="font-size:10px; color:var(--text-secondary);">${stack.description}</span>
+              </div>
+            </button>
+          `).join('')}
+        </div>
+        <button class="skip-suggestion-btn" id="skipSuggestionBtn" style="width:100%; margin-top:4px;">Skip - Default HTML/CSS/JS</button>
+      </div>
+    </div>
+  `;
+
+  chatContainer.appendChild(suggestDiv);
+  chatContainer.scrollTop = chatContainer.scrollHeight;
+
+  // Attach event listeners to cards
+  suggestDiv.querySelectorAll('.stack-card').forEach(card => {
+    card.addEventListener('click', () => {
+      const stackId = card.dataset.stackId;
+      const stack = PROJECT_STACKS.find(s => s.id === stackId);
+      if (!stack) return;
+
+      suggestDiv.remove();
+      state.pendingStackSelection = false;
+
+      addMessage('user', `Build with ${stack.name}: ${state.pendingUserPrompt}`);
+
+      const enhancedPrompt = `${state.pendingUserPrompt}\n\n${stack.prompt}`;
+      sendMessageDirect(enhancedPrompt);
+    });
+  });
+
+  // Skip button
+  suggestDiv.querySelector('#skipSuggestionBtn')?.addEventListener('click', () => {
+    suggestDiv.remove();
+    state.pendingStackSelection = false;
+    sendMessageDirect(state.pendingUserPrompt);
+  });
+}
+
 // ===== Chat =====
 function addMessage(role, content, image = null) {
   state.messages.push({ role, content, image });
   renderMessages();
+  saveCurrentSession();
 }
 
 function renderMessages() {
@@ -268,21 +430,18 @@ function renderMessages() {
   const welcome = container.querySelector('.welcome-message');
   if (welcome && state.messages.length > 0) welcome.remove();
 
-  // Clear only message elements (keep welcome if no messages)
   container.querySelectorAll('.message').forEach(m => m.remove());
 
   state.messages.forEach((msg) => {
     const div = document.createElement('div');
+    const isDS = isDeepSeekModel(state.currentModel);
     div.className = `message ${msg.role === 'user' ? 'user' : 'assistant'}`;
 
-    const avatar = msg.role === 'user' ? '👤' : '⚡';
-    const sender = msg.role === 'user' ? 'You' : 'CodeAgent';
+    const avatar = msg.role === 'user' ? '👤' : (isDS ? '🔮' : '⚡');
+    const sender = msg.role === 'user' ? 'You' : (isDS ? 'DeepSeek' : 'CodeAgent');
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-    // Parse markdown for assistant messages
     let contentHTML = msg.role === 'assistant' ? parseMessageContent(msg.content) : escapeHtml(msg.content);
-    
-    // Add image attachment bubble if present
     const attachmentHTML = msg.image ? `<div class="message-attachment"><img src="${msg.image}" alt="Attached Image" /></div>` : '';
 
     div.innerHTML = `
@@ -300,36 +459,229 @@ function renderMessages() {
 
     container.appendChild(div);
   });
+
+  // Attach apply buttons on mobile chat code blocks
+  container.querySelectorAll('pre code').forEach(codeBlock => {
+    const pre = codeBlock.parentNode;
+    const parentNode = pre.parentNode;
+    if (parentNode && !parentNode.classList.contains('code-block-wrapper')) {
+      const codeText = codeBlock.textContent;
+      const classes = Array.from(codeBlock.classList);
+      const langClass = classes.find(c => c.startsWith('language-'));
+      const lang = langClass ? langClass.replace('language-', '') : 'html';
+      const filename = extractFilename(codeText, lang);
+
+      const wrapper = document.createElement('div');
+      wrapper.className = 'code-block-wrapper';
+      wrapper.innerHTML = `
+        <div class="code-block-header" style="display:flex; justify-content:space-between; align-items:center; background:var(--bg-tertiary); padding:4px 8px; font-size:10px; border-radius:var(--radius-sm) var(--radius-sm) 0 0; border: 1px solid var(--border); border-bottom:none;">
+          <span class="code-lang" style="font-family:var(--font-mono); color:var(--text-secondary);">${filename}</span>
+          <button class="apply-btn" style="background:transparent; border:none; color:var(--accent-cyan); font-size:10px; cursor:pointer;">▶ Apply</button>
+        </div>
+      `;
+      
+      parentNode.insertBefore(wrapper, pre);
+      wrapper.appendChild(pre);
+
+      wrapper.querySelector('.apply-btn').addEventListener('click', () => {
+        applyCodeToEditor(codeText, filename);
+      });
+    }
+  });
+
   container.scrollTop = container.scrollHeight;
+}
+
+function extractFilename(blockCode, defaultLang) {
+  const lines = blockCode.split('\n').map(l => l.trim());
+  
+  // Find the first few non-empty lines (up to 4)
+  const nonEmptyLines = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i]) {
+      nonEmptyLines.push({ line: lines[i], index: i });
+      if (nonEmptyLines.length >= 4) break;
+    }
+  }
+
+  // Check each of these lines for any filename pattern
+  for (const item of nonEmptyLines) {
+    const line = item.line;
+    
+    // 1. Check for HTML comment: <!-- filename.ext --> or <!-- File: filename.ext -->
+    const htmlMatch = line.match(/<!--\s*(?:file:\s*)?([\w\-./]+\.[\w]+)\s*-->/i);
+    if (htmlMatch) return htmlMatch[1];
+    
+    // 2. Check for CSS/JS comment: /* filename.ext */, // filename.ext, or // File: filename.ext
+    const cssMatch = line.match(/\/\*\s*(?:file:\s*)?([\w\-./]+\.[\w]+)\s*\*\//i);
+    if (cssMatch) return cssMatch[1];
+    
+    const jsMatch = line.match(/\/\/\s*(?:file:\s*)?([\w\-./]+\.[\w]+)/i);
+    if (jsMatch) return jsMatch[1];
+
+    // 3. Check for Python/Config comment: # filename.ext or # File: filename.ext
+    const pyMatch = line.match(/#\s*(?:file:\s*)?([\w\-./]+\.[\w]+)/i);
+    if (pyMatch) return pyMatch[1];
+    
+    // 4. Check for bold markdown text or bullet pointing to a filename
+    // e.g., "**App.jsx**" or "### App.jsx"
+    const boldMatch = line.match(/\*\*(?:file:\s*)?([\w\-./]+\.[\w]+)\*\*/i);
+    if (boldMatch) return boldMatch[1];
+  }
+
+  // Smart content-based analysis if comment fails
+  const lowerCode = blockCode.toLowerCase();
+  const lowerLang = (defaultLang || '').toLowerCase();
+
+  // If language matches JavaScript/TypeScript/JSX
+  if (['javascript', 'js', 'jsx', 'typescript', 'ts', 'tsx'].includes(lowerLang)) {
+    // If it contains package.json structure
+    if (blockCode.includes('"name":') && blockCode.includes('"dependencies":') && blockCode.includes('"version":')) {
+      return 'package.json';
+    }
+    // If it contains React/JSX code
+    if (blockCode.includes('React') || blockCode.includes('useState') || blockCode.includes('useEffect') || blockCode.includes('createRoot') || blockCode.includes('ReactDOM') || blockCode.includes('</') || blockCode.includes('import ')) {
+      // If it looks like main entry point
+      if (blockCode.includes('root.render') || blockCode.includes('ReactDOM.render')) {
+        return 'script.js';
+      }
+      return 'App.jsx';
+    }
+  }
+
+  // If language matches css
+  if (['css', 'scss'].includes(lowerLang)) {
+    if (blockCode.includes('static/') || blockCode.includes('assets/')) {
+      return 'static/style.css';
+    }
+    return 'style.css';
+  }
+
+  // If language matches python
+  if (lowerLang === 'python' || lowerLang === 'py') {
+    if (blockCode.includes('flask') || blockCode.includes('Flask') || blockCode.includes('@app.route')) {
+      return 'app.py';
+    }
+    if (blockCode.includes('pip ') || blockCode.includes('gunicorn')) {
+      return 'requirements.txt';
+    }
+    return 'app.py';
+  }
+
+  return detectTargetLang(defaultLang);
+}
+
+function detectTargetLang(lang) {
+  if (['html', 'htm'].includes(lang)) return 'index.html';
+  if (['css'].includes(lang)) return 'style.css';
+  if (['javascript', 'js'].includes(lang)) return 'script.js';
+  if (['jsx', 'tsx'].includes(lang)) return 'App.jsx';
+  if (['python', 'py'].includes(lang)) return 'app.py';
+  if (['vue'].includes(lang)) return 'App.vue';
+  if (['json'].includes(lang)) return 'package.json';
+  return 'index.html';
+}
+
+function applyCodeToEditor(code, filename) {
+  state.files[filename] = code;
+  renderFileSelector();
+  switchFile(filename);
+  switchView('code');
+}
+
+// ===== Streaming Chat =====
+// ===== AI Generating Overlay Utility =====
+function toggleGeneratingOverlay(show, text = 'AI is scaffolding your project...') {
+  const container = document.getElementById('codePanel');
+  if (!container) return;
+
+  let overlay = document.getElementById('editorGeneratingOverlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'editorGeneratingOverlay';
+    overlay.className = 'editor-generating-overlay';
+    overlay.innerHTML = `
+      <div class="generating-content">
+        <div class="generating-scanner">
+          <span class="generating-scanner-icon">🔮</span>
+        </div>
+        <div class="generating-title" id="generatingOverlayTitle">AI is scaffolding your project...</div>
+        <div class="generating-subtitle">Constructing complete stack folder structure & files...</div>
+        <div class="generating-progress">
+          <div class="generating-progress-bar"></div>
+        </div>
+      </div>
+    `;
+    container.appendChild(overlay);
+  }
+
+  const titleEl = overlay.querySelector('#generatingOverlayTitle');
+  if (titleEl && text) {
+    titleEl.textContent = text;
+  }
+
+  if (show) {
+    overlay.classList.add('active');
+  } else {
+    overlay.classList.remove('active');
+  }
 }
 
 // ===== Streaming Chat =====
 async function sendMessage(text) {
   if (state.isGenerating || (!text.trim() && !state.attachedImage)) return;
 
-  const currentImage = state.attachedImage;
-  
-  // Reset attachment UI
-  state.attachedImage = null;
-  const attachmentPreview = document.getElementById('attachmentPreview');
-  if (attachmentPreview) attachmentPreview.style.display = 'none';
+  if (isDeepSeekModel(state.currentModel) && text.trim() && !state.pendingStackSelection) {
+    const currentImage = state.attachedImage;
+    state.attachedImage = null;
+    const attachmentPreview = document.getElementById('attachmentPreview');
+    if (attachmentPreview) attachmentPreview.style.display = 'none';
 
-  addMessage('user', text, currentImage);
+    addMessage('user', text, currentImage);
+    showProjectSuggestionCards(text);
+    return;
+  }
+
+  await sendMessageDirect(text);
+}
+
+async function sendMessageDirect(text) {
+  if (state.isGenerating) return;
+
+  const isDS = isDeepSeekModel(state.currentModel);
+  if (state.currentMode !== 'chat') {
+    const overlayText = isDS ? 'DeepSeek is scaffolding your full-stack project...' : 'CodeAgent is generating your code...';
+    toggleGeneratingOverlay(true, overlayText);
+  }
+
+  const lastMsg = state.messages[state.messages.length - 1];
+  const alreadyAdded = lastMsg && lastMsg.role === 'user' && (
+    lastMsg.content === text ||
+    lastMsg.content.includes(state.pendingUserPrompt)
+  );
+
+  if (!alreadyAdded) {
+    const currentImage = state.attachedImage;
+    state.attachedImage = null;
+    const attachmentPreview = document.getElementById('attachmentPreview');
+    if (attachmentPreview) attachmentPreview.style.display = 'none';
+    addMessage('user', text, currentImage);
+  }
+
   state.isGenerating = true;
   document.getElementById('sendBtn').disabled = true;
 
-  // Add thinking indicator
   const chatContainer = document.getElementById('chatMessages');
   const thinkingDiv = document.createElement('div');
   thinkingDiv.className = 'message assistant';
   thinkingDiv.id = 'thinkingMsg';
   thinkingDiv.innerHTML = `
-    <div class="message-avatar">⚡</div>
+    <div class="message-avatar">${isDS ? '🔮' : '⚡'}</div>
     <div class="message-body">
-      <div class="message-header"><span class="message-sender">CodeAgent</span></div>
+      <div class="message-header"><span class="message-sender">${isDS ? 'DeepSeek' : 'CodeAgent'}</span></div>
       <div class="thinking-indicator">
         <div class="thinking-dots"><span></span><span></span><span></span></div>
-        <span class="thinking-text">Thinking...</span>
+        <span class="thinking-text">${state.currentMode === 'auto' ? 'Analyzing intent...' : (isDS ? 'Reasoning...' : 'Thinking...')}</span>
       </div>
     </div>`;
   chatContainer.appendChild(thinkingDiv);
@@ -359,6 +711,7 @@ async function sendMessage(text) {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let assistantContent = '';
+    let autoDetectedIntent = null;
 
     thinkingDiv.remove();
 
@@ -378,17 +731,26 @@ async function sendMessage(text) {
           if (data === '[DONE]') break;
           try {
             const parsed = JSON.parse(data);
-            if (parsed.error) {
+            if (parsed.intent) {
+              autoDetectedIntent = parsed.intent;
+            } else if (parsed.error) {
               assistantContent += `\n\n**Error:** ${parsed.error}`;
             } else if (parsed.content) {
               assistantContent += parsed.content;
             }
-          } catch (e) { /* skip parse errors */ }
+          } catch (e) { /* skip */ }
         }
       }
 
       state.messages[msgIndex].content = assistantContent;
       renderMessages();
+    }
+    saveCurrentSession();
+
+    // Auto-apply on mobile for agent/auto-coding modes
+    if (state.currentMode === 'agent' || (state.currentMode === 'auto' && autoDetectedIntent === 'code')) {
+      autoApplyCode(assistantContent);
+      saveCurrentSession();
     }
   } catch (error) {
     const thinkEl = document.getElementById('thinkingMsg');
@@ -396,20 +758,50 @@ async function sendMessage(text) {
     addMessage('assistant', `**Error:** ${error.message}. Make sure the server is running.`);
   } finally {
     state.isGenerating = false;
+    state.pendingUserPrompt = '';
     document.getElementById('sendBtn').disabled = false;
+    toggleGeneratingOverlay(false);
+  }
+}
+
+function autoApplyCode(content) {
+  const codeBlockRegex = /```(\w+)?\r?\n([\s\S]*?)```/g;
+  let match;
+  const blocks = [];
+  while ((match = codeBlockRegex.exec(content)) !== null) {
+    blocks.push({ lang: match[1] || 'html', code: match[2].trim() });
+  }
+
+  if (blocks.length === 1) {
+    const block = blocks[0];
+    const filename = extractFilename(block.code, block.lang);
+    state.files[filename] = block.code;
+    
+    renderFileSelector();
+    switchFile(filename);
+    switchView('code');
+  } else if (blocks.length > 1) {
+    blocks.forEach(block => {
+      const filename = extractFilename(block.code, block.lang);
+      state.files[filename] = block.code;
+    });
+    
+    renderFileSelector();
+    
+    const firstFilename = extractFilename(blocks[0].code, blocks[0].lang);
+    switchFile(firstFilename);
+    switchView('code');
   }
 }
 
 // ===== Event Listeners =====
 function initEvents() {
-  // Topbar Switch Header Tab Buttons (Blue Highlight part)
   document.querySelectorAll('.mobile-tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       switchView(btn.dataset.view);
     });
   });
 
-  // Mobile File Selector Dropdown Select (Code Screen Toolbar)
   const mobileFileSelector = document.getElementById('mobileFileSelector');
   if (mobileFileSelector) {
     mobileFileSelector.addEventListener('change', (e) => {
@@ -417,7 +809,6 @@ function initEvents() {
     });
   }
 
-  // Mobile Preview Compile Run Button Trigger
   const mobileRunBtn = document.getElementById('mobileRunBtn');
   if (mobileRunBtn) {
     mobileRunBtn.addEventListener('click', () => {
@@ -425,7 +816,7 @@ function initEvents() {
     });
   }
 
-  // Model select inline dropdown toggle
+  // Model select dropdown toggler
   const modelSelectBtnInline = document.getElementById('modelSelectBtnInline');
   const modelDropdownInline = document.getElementById('modelDropdownInline');
   if (modelSelectBtnInline && modelDropdownInline) {
@@ -436,7 +827,7 @@ function initEvents() {
     });
   }
 
-  // Mode select inline dropdown toggle
+  // Mode select dropdown toggler
   const modeSelectBtnInline = document.getElementById('modeSelectBtnInline');
   const modeDropdownInline = document.getElementById('modeDropdownInline');
   if (modeSelectBtnInline && modeDropdownInline) {
@@ -447,17 +838,12 @@ function initEvents() {
     });
   }
 
-  // Close dropdowns on body tap
-  document.addEventListener('click', (e) => {
-    if (!e.target.closest('.model-selector-inline')) {
-      document.getElementById('modelDropdownInline')?.classList.remove('open');
-    }
-    if (!e.target.closest('.mode-selector-inline')) {
-      document.getElementById('modeDropdownInline')?.classList.remove('open');
-    }
+  document.addEventListener('click', () => {
+    document.getElementById('modelDropdownInline')?.classList.remove('open');
+    document.getElementById('modeDropdownInline')?.classList.remove('open');
   });
 
-  // Mode selections (Image 2 highlight updates)
+  // Mode select option items
   document.querySelectorAll('#modeDropdownInline .mode-option-item').forEach(item => {
     item.addEventListener('click', () => {
       state.currentMode = item.dataset.mode;
@@ -477,7 +863,7 @@ function initEvents() {
     });
   });
 
-  // Vision File Image attachment selectors
+  // Vision image upload attachments
   const attachBtn = document.getElementById('attachBtn');
   const imageAttachmentInput = document.getElementById('imageAttachmentInput');
   const attachmentPreview = document.getElementById('attachmentPreview');
@@ -512,12 +898,10 @@ function initEvents() {
     });
   }
 
-  // Textarea multi-line height adjustment limit of max 3 lines (4.2em)
   const chatInput = document.getElementById('chatInput');
   if (chatInput) {
     chatInput.addEventListener('input', () => {
       chatInput.style.height = 'auto';
-      // Auto-grow height according to scrollHeight
       chatInput.style.height = `${chatInput.scrollHeight}px`;
     });
 
@@ -532,7 +916,6 @@ function initEvents() {
     });
   }
 
-  // Chat send trigger button
   const sendBtn = document.getElementById('sendBtn');
   if (sendBtn && chatInput) {
     sendBtn.addEventListener('click', () => {
@@ -543,21 +926,229 @@ function initEvents() {
     });
   }
 
-  // Quick Action card prompt clicks
   document.querySelectorAll('.quick-action-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const prompt = btn.dataset.prompt;
       if (prompt) sendMessage(prompt);
     });
   });
+
+  document.getElementById('newChatBtn')?.addEventListener('click', () => {
+    startNewChat();
+  });
+
+  document.getElementById('historyToggleBtn')?.addEventListener('click', () => {
+    const historyPanel = document.getElementById('chatHistoryPanel');
+    if (historyPanel) {
+      const isOpen = historyPanel.style.display === 'flex';
+      historyPanel.style.display = isOpen ? 'none' : 'flex';
+      if (!isOpen) {
+        renderHistoryList();
+      }
+    }
+  });
+
+  document.getElementById('closeHistoryBtn')?.addEventListener('click', () => {
+    const historyPanel = document.getElementById('chatHistoryPanel');
+    if (historyPanel) {
+      historyPanel.style.display = 'none';
+    }
+  });
+}
+
+// ===== Chat History Management =====
+function getHistoryList() {
+  try {
+    const list = localStorage.getItem('codeagent_history');
+    return list ? JSON.parse(list) : [];
+  } catch (e) {
+    console.error('Failed to parse history:', e);
+    return [];
+  }
+}
+
+function saveHistoryList(list) {
+  try {
+    localStorage.setItem('codeagent_history', JSON.stringify(list));
+  } catch (e) {
+    console.error('Failed to save history:', e);
+  }
+}
+
+function saveCurrentSession() {
+  if (state.messages.length === 0) return;
+
+  if (!state.currentSessionId) {
+    state.currentSessionId = Date.now().toString();
+  }
+
+  const list = getHistoryList();
+  let session = list.find(s => s.id === state.currentSessionId);
+  if (!session) {
+    session = {
+      id: state.currentSessionId,
+      title: state.messages[0]?.content?.slice(0, 30) || 'New Chat',
+      timestamp: new Date().toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
+      messages: [],
+      files: {}
+    };
+    list.unshift(session);
+  } else {
+    const index = list.indexOf(session);
+    if (index > -1) {
+      list.splice(index, 1);
+      list.unshift(session);
+    }
+  }
+
+  session.messages = [...state.messages];
+  session.files = { ...state.files };
+  session.currentFile = state.currentFile;
+  saveHistoryList(list);
+}
+
+function loadSession(sessionId) {
+  const list = getHistoryList();
+  const session = list.find(s => s.id === sessionId);
+  if (!session) return;
+
+  state.currentSessionId = session.id;
+  state.messages = [...session.messages];
+  state.files = { ...session.files };
+  
+  renderMessages();
+  
+  if (session.currentFile && state.files[session.currentFile]) {
+    state.currentFile = session.currentFile;
+  } else {
+    state.currentFile = Object.keys(state.files)[0] || 'index.html';
+  }
+
+  renderFileSelector();
+  switchFile(state.currentFile);
+  updatePreview();
+  
+  document.getElementById('chatHistoryPanel').style.display = 'none';
+}
+
+function deleteSession(sessionId, event) {
+  if (event) event.stopPropagation();
+
+  const list = getHistoryList();
+  const newList = list.filter(s => s.id !== sessionId);
+  saveHistoryList(newList);
+
+  if (state.currentSessionId === sessionId) {
+    startNewChat();
+  } else {
+    renderHistoryList();
+  }
+}
+
+function startNewChat() {
+  state.currentSessionId = null;
+  state.messages = [];
+  state.files = {
+    'index.html': `<!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="UTF-8">\n  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n  <title>My Project</title>\n  <link rel="stylesheet" href="style.css">\n</head>\n<body>\n  <h1>Hello World!</h1>\n  <p>Start coding or ask the AI agent to generate code for you.</p>\n  <script src="script.js"><\/script>\n</body>\n</html>`,
+    'style.css': `* {\n  margin: 0;\n  padding: 0;\n  box-sizing: border-box;\n}\n\nbody {\n  font-family: system-ui, sans-serif;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  min-height: 100vh;\n  background: #0a0a0f;\n  color: #e8e8f0;\n}\n\nh1 {\n  font-size: 2.5rem;\n  margin-bottom: 0.5rem;\n}`,
+    'script.js': `// Your JavaScript code here\nconsole.log('Hello from CodeAgent!');\n`
+  };
+  state.currentFile = 'index.html';
+
+  const container = document.getElementById('chatMessages');
+  container.innerHTML = '';
+  container.innerHTML = `<div class="welcome-message">
+    <div class="welcome-orb">
+      <div class="orb-ring"></div>
+      <div class="orb-core">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none">
+          <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" fill="url(#orb-grad)" opacity="0.9"/>
+          <defs>
+            <linearGradient id="orb-grad" x1="3" y1="2" x2="21" y2="22">
+              <stop stop-color="#00f0ff"/>
+              <stop offset="1" stop-color="#b400ff"/>
+            </linearGradient>
+          </defs>
+        </svg>
+      </div>
+    </div>
+    <h3>Hey there! 👋</h3>
+    <p>I'm your AI coding assistant. Let's build something amazing together.</p>
+    
+    <div class="quick-actions">
+      <button class="quick-action-btn" data-prompt="Create a beautiful landing page with animated gradients and modern design">
+        <div class="qa-icon">✨</div>
+        <div class="qa-content">
+          <span class="qa-title">Landing Page</span>
+          <span class="qa-desc">Animated gradients & modern design</span>
+        </div>
+        <svg class="qa-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+      </button>
+      <button class="quick-action-btn" data-prompt="Build a todo app with local storage, animations, and a sleek dark theme">
+        <div class="qa-icon">📋</div>
+        <div class="qa-content">
+          <span class="qa-title">Todo App</span>
+          <span class="qa-desc">Storage, animations & dark theme</span>
+        </div>
+        <svg class="qa-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+      </button>
+    </div>
+  </div>`;
+
+  container.querySelectorAll('.quick-action-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const prompt = btn.dataset.prompt;
+      if (prompt) sendMessage(prompt);
+    });
+  });
+
+  renderFileSelector();
+  switchFile('index.html');
+  updatePreview();
+  
+  document.getElementById('chatHistoryPanel').style.display = 'none';
+  switchView('chat');
+}
+
+function renderHistoryList() {
+  const container = document.getElementById('historyListContainer');
+  if (!container) return;
+
+  container.innerHTML = '';
+  const list = getHistoryList();
+
+  if (list.length === 0) {
+    container.innerHTML = '<div style="text-align: center; color: var(--text-secondary); font-size: 12px; margin-top: 40px;">No conversation history yet.</div>';
+    return;
+  }
+
+  list.forEach(session => {
+    const activeClass = session.id === state.currentSessionId ? 'active' : '';
+    const item = document.createElement('div');
+    item.className = `history-item ${activeClass}`;
+    item.innerHTML = `
+      <div class="history-item-details">
+        <span class="history-item-title">${escapeHtml(session.title)}</span>
+        <span class="history-item-date">${session.timestamp}</span>
+      </div>
+      <button class="history-item-delete" title="Delete conversation">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+      </button>
+    `;
+
+    item.addEventListener('click', () => loadSession(session.id));
+    item.querySelector('.history-item-delete').addEventListener('click', (e) => deleteSession(session.id, e));
+
+    container.appendChild(item);
+  });
 }
 
 // ===== Initializer =====
 document.addEventListener('DOMContentLoaded', () => {
   initEvents();
+  renderFileSelector();
   initEditor();
   loadModels();
   updatePreview();
-  // Set initial tab indicator position
   updateTabIndicator('chat');
 });

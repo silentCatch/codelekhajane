@@ -55,8 +55,13 @@
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
           </svg>
-        </button>
       </div>
+      <a class="mobile-tab-btn" href="/training" title="Training Hub" style="display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--border); background: rgba(255, 255, 255, 0.03); color: var(--text-secondary); text-decoration: none; margin-left: 6px; transition: all var(--transition-fast);">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M22 10v6M2 10l10-5 10 5-10 5z"/>
+          <path d="M6 12v5c0 2 2 3 6 3s6-1 6-3v-5"/>
+        </svg>
+      </a>
     </div>
   </header>
 
@@ -64,6 +69,35 @@
   <main id="mainLayout">
     <!-- 1. Chat Panel -->
     <section id="chatPanel" class="panel mobile-view-panel active">
+      <div class="chat-panel-header">
+        <span class="chat-panel-title">AI Assistant</span>
+        <div class="chat-panel-actions">
+          <button class="action-btn" id="newChatBtn" title="New Chat">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+          </button>
+          <button class="action-btn" id="historyToggleBtn" title="Conversation History">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"></circle>
+              <polyline points="12 6 12 12 16 14"></polyline>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Chat History Panel overlay -->
+      <div id="chatHistoryPanel" class="chat-history-panel" style="display: none;">
+        <div class="history-header">
+          <h3>Conversation History</h3>
+          <button id="closeHistoryBtn" class="close-history-btn">&times;</button>
+        </div>
+        <div class="history-list" id="historyListContainer">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+
       <div class="chat-messages" id="chatMessages">
         <div class="welcome-message">
           <!-- Animated Glow Orb -->
